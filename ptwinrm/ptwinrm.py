@@ -11,6 +11,8 @@ Usage:
   winrm [--user=<user>]
         [--password=<password>]
         [--transport=<transport>]
+        [--server_cert_validation=<validate>]
+        [--ssl=<ssl>]
         [--run=<cmd>] <host>
 
 Options:
@@ -18,6 +20,8 @@ Options:
   --user=<user>            user name
   --password=<password>    password on the command line
   --transport=<transport>  [default: ntlm]. Valid: 'kerberos', 'ntlm'
+  --server_cert_validation=<validate>  [default: validate]. Valid: 'validate', 'ignore'
+  --ssl=<use_ssl>          [default: ssl]. Valid: 'ssl', 'plaintext'
   --run=<cmd>              command to execute (if not given, a console starts)
 """
 
@@ -29,6 +33,7 @@ from functools import partial
 
 import winrm
 import winrm.exceptions
+from winrm.protocol import Protocol
 import requests.exceptions
 from docopt import docopt
 from prompt_toolkit import prompt
@@ -39,6 +44,18 @@ from prompt_toolkit.styles import style_from_dict
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.key_binding.manager import KeyBindingManager
+
+
+class WinRMSession(winrm.Session):
+    def __init__(self, target, auth, **kwargs):
+        username, password = auth
+        self.url = self._build_url(target, kwargs.get('ssl', 'ssl'))
+        self.protocol = Protocol(
+            endpoint=self.url,
+            transport=kwargs.get('transport', 'ntlm'),
+            username=username,
+            password=password,
+            server_cert_validation=kwargs.get('server_cert_validation', 'validate'))
 
 
 class WinRMConsole(object):
@@ -76,7 +93,8 @@ class WinRMConsole(object):
         if result is None:
             return
         if result.status_code:
-            print('ERROR ({0}): {1}'.format(result.status_code, result.std_err))
+            print('ERROR ({0}): {1}'.format(
+                result.status_code, result.std_err))
         else:
             print(result.std_out)
             if result.std_err:
@@ -130,7 +148,8 @@ class WinRMConsole(object):
 
         try:
             prompt_msg = self.get_prompt()
-        except:
+        except Exception as e:
+            print("ERROR: {}".format(e))
             return
         while True:
             try:
@@ -148,9 +167,15 @@ def main():
     user = opt['--user'] or prompt('user: ')
     password = opt['--password'] or prompt('password: ', is_password=True)
     transport = opt['--transport']
+    server_cert_validation = opt['--server_cert_validation']
+    ssl = opt['--ssl']
     host = opt['<host>']
 
-    session = winrm.Session(host, (user, password), transport=transport)
+    session = WinRMSession(host,
+                           (user, password),
+                           transport=transport,
+                           server_cert_validation=server_cert_validation,
+                           ssl=ssl)
     console = WinRMConsole(session)
 
     if opt['--run']:
