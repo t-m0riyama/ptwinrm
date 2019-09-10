@@ -9,6 +9,7 @@
 
 Usage:
   winrm [--user=<user>]
+        [--encoding=<encoding>]
         [--password=<password>]
         [--transport=<transport>]
         [--server_cert_validation=<validate>]
@@ -18,6 +19,7 @@ Usage:
 Options:
   -h --help                show this
   --user=<user>            user name
+  --encoding=<encoding>    specify console encoding (defaults to stdout encoding)
   --password=<password>    password on the command line
   --transport=<transport>  [default: ntlm]. Valid: 'kerberos', 'ntlm'
   --server_cert_validation=<validate>  [default: validate]. Valid: 'validate', 'ignore'
@@ -61,8 +63,9 @@ class WinRMSession(winrm.Session):
 class WinRMConsole(object):
     """WinRM Console"""
 
-    def __init__(self, session):
+    def __init__(self, session, encoding):
         self.session = session
+        self.encoding = encoding
         self.multiline = False
 
     @property
@@ -93,12 +96,13 @@ class WinRMConsole(object):
         if result is None:
             return
         if result.status_code:
-            print('ERROR ({0}): {1}'.format(
-                result.status_code, result.std_err))
+            print('ERROR ({0}): {1}'.format(result.status_code,
+                                            result.std_err.decode(self.encoding)))
         else:
-            print(result.std_out)
+            print(result.std_out.decode(self.encoding))
             if result.std_err:
-                print('ERROR: {0}'.format(result.std_err))
+                print('ERROR: {0}'.format(
+                    result.std_err.decode(self.encoding)))
         return result
 
     def toggle_multiline(self):
@@ -107,7 +111,7 @@ class WinRMConsole(object):
 
     def get_prompt(self):
         r = self.run_cmd_line('cd')
-        return r.std_out.strip() + '>'
+        return r.std_out.strip().decode(self.encoding) + ">"
 
     def rep(self, cmd_line):
         result = self.run_cmd_line(cmd_line)
@@ -167,6 +171,7 @@ def main():
     user = opt['--user'] or prompt('user: ')
     password = opt['--password'] or prompt('password: ', is_password=True)
     transport = opt['--transport']
+    encoding = opt["--encoding"] or sys.stdout.encoding
     server_cert_validation = opt['--server_cert_validation']
     ssl = opt['--ssl']
     host = opt['<host>']
@@ -176,7 +181,7 @@ def main():
                            transport=transport,
                            server_cert_validation=server_cert_validation,
                            ssl=ssl)
-    console = WinRMConsole(session)
+    console = WinRMConsole(session, encoding=encoding)
 
     if opt['--run']:
         cmd_result = console.rep(opt['--run'])
