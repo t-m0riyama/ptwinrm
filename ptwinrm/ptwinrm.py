@@ -14,6 +14,7 @@ Usage:
         [--transport=<transport>]
         [--server_cert_validation=<validate>]
         [--ssl=<ssl>]
+        [--shell=<shell>]
         [--run=<cmd>] <host>
 
 Options:
@@ -24,6 +25,7 @@ Options:
   --transport=<transport>  [default: ntlm]. Valid: 'kerberos', 'ntlm'
   --server_cert_validation=<validate>  [default: validate]. Valid: 'validate', 'ignore'
   --ssl=<use_ssl>          [default: ssl]. Valid: 'ssl', 'plaintext'
+  --shell=<shell>          [default: cmd]. Valid: 'cmd', 'powershell'
   --run=<cmd>              command to execute (if not given, a console starts)
 """
 
@@ -63,10 +65,11 @@ class WinRMSession(winrm.Session):
 class WinRMConsole(object):
     """WinRM Console"""
 
-    def __init__(self, session, encoding):
+    def __init__(self, session, encoding, shell):
         self.session = session
         self.encoding = encoding
         self.multiline = False
+        self.shell = shell
 
     @property
     def username(self):
@@ -86,7 +89,7 @@ class WinRMConsole(object):
     def __run_cmd_line(self, cmd_line):
         if not cmd_line.strip():
             return
-        if '\n' in cmd_line:
+        if '\n' in cmd_line or self.shell == 'powershell':
             return self.session.run_ps(cmd_line)
         else:
             cmd = cmd_line.split()
@@ -96,13 +99,19 @@ class WinRMConsole(object):
         if result is None:
             return
         if result.status_code:
-            print('ERROR ({0}): {1}'.format(result.status_code,
+            print(result.std_out.decode(self.encoding))
+            if result.std_err:
+                print('ERROR ({0}): {1}'.format(result.status_code,
                                             result.std_err.decode(self.encoding)))
+            else:
+                print('ERROR ({0})'.format(result.status_code))
         else:
             print(result.std_out.decode(self.encoding))
             if result.std_err:
-                print('ERROR: {0}'.format(
-                    result.std_err.decode(self.encoding)))
+                # ignore CLIXML error
+                if not result.std_err.decode(self.encoding).startswith('#< CLIXML'):
+                    print('ERROR: {0}'.format(
+                        result.std_err.decode(self.encoding)))
         return result
 
     def toggle_multiline(self):
@@ -110,8 +119,12 @@ class WinRMConsole(object):
         return self.multiline
 
     def get_prompt(self):
-        r = self.run_cmd_line('cd')
-        return r.std_out.strip().decode(self.encoding) + ">"
+        if self.shell == 'powershell':
+            r = self.run_cmd_line('(pwd).Path')
+            return "PS " + r.std_out.strip().decode(self.encoding) + "> "
+        else:
+            r = self.run_cmd_line('cd')
+            return r.std_out.strip().decode(self.encoding) + ">"
 
     def rep(self, cmd_line):
         result = self.run_cmd_line(cmd_line)
@@ -173,6 +186,7 @@ def main():
     transport = opt['--transport']
     encoding = opt["--encoding"] or sys.stdout.encoding
     server_cert_validation = opt['--server_cert_validation']
+    shell = opt['--shell'] or 'cmd'
     ssl = opt['--ssl']
     host = opt['<host>']
 
@@ -181,7 +195,7 @@ def main():
                            transport=transport,
                            server_cert_validation=server_cert_validation,
                            ssl=ssl)
-    console = WinRMConsole(session, encoding=encoding)
+    console = WinRMConsole(session, encoding=encoding, shell=shell)
 
     if opt['--run']:
         cmd_result = console.rep(opt['--run'])
